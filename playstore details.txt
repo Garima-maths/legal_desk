@@ -1,0 +1,6 @@
+Steps to generate public Key for Play store --------keytool -genkeypair -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+
+password -----LegalDesk@2026
+
+
+To extract the generated Key------keytool -printcert -jarfile build/app/outputs/flutter-apk/app-release.apk

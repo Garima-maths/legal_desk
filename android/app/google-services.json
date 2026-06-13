@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "147607725699",
+    "project_id": "legal-desk-170397",
+    "storage_bucket": "legal-desk-170397.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:147607725699:android:65be7b2087f580bfb3ddb6",
+        "android_client_info": {
+          "package_name": "com.example.legal_desk"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDq0l4OA-4JiFicV2XZGJ_9bIuumvhTM_U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:147607725699:android:a2385b6ab4a703c0b3ddb6",
+        "android_client_info": {
+          "package_name": "com.madhav.legal_desk"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDq0l4OA-4JiFicV2XZGJ_9bIuumvhTM_U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

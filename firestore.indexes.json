@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "dictionary",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "letter", "order": "ASCENDING" },
+        { "fieldPath": "term",   "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
