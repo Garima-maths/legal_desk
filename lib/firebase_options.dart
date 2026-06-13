@@ -23,15 +23,9 @@ class DefaultFirebaseOptions {
       case TargetPlatform.android:
         return android;
       case TargetPlatform.iOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for ios - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return ios;
       case TargetPlatform.macOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for macos - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return macos;
       case TargetPlatform.windows:
         return windows;
       case TargetPlatform.linux:
@@ -70,5 +64,22 @@ class DefaultFirebaseOptions {
     projectId: 'legal-desk-170397',
     authDomain: 'legal-desk-170397.firebaseapp.com',
     storageBucket: 'legal-desk-170397.firebasestorage.app',
+  );
+  static const FirebaseOptions macos = FirebaseOptions(
+    apiKey: 'AIzaSyCnh28iAdGrVBPSGU27E6_-BvNviR_Lisg',
+    appId: '1:147607725699:ios:092edf1f923a1ec5b3ddb6',
+    messagingSenderId: '147607725699',
+    projectId: 'legal-desk-170397',
+    storageBucket: 'legal-desk-170397.firebasestorage.app',
+    iosBundleId: 'com.example.legalDesk',
+  );
+
+  static const FirebaseOptions ios = FirebaseOptions(
+    apiKey: 'AIzaSyCnh28iAdGrVBPSGU27E6_-BvNviR_Lisg',
+    appId: '1:147607725699:ios:cb461a23ece4fec3b3ddb6',
+    messagingSenderId: '147607725699',
+    projectId: 'legal-desk-170397',
+    storageBucket: 'legal-desk-170397.firebasestorage.app',
+    iosBundleId: 'com.madhav.legal-desk',
   );
 }
