@@ -73,6 +73,12 @@ flutter_launcher_icons:
 # The following section is specific to Flutter packages.
 flutter:
 
+  # Disable Swift Package Manager so all iOS plugins (incl. webview_flutter_wkwebview,
+  # pulled transitively by google_mobile_ads) are integrated via CocoaPods. google_mobile_ads
+  # is CocoaPods-only, so mixing SPM breaks `pod install` on CI. See plan/cdn-trunk fix.
+  config:
+    enable-swift-package-manager: false
+
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.
