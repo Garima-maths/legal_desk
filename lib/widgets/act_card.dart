@@ -6,12 +6,16 @@ class ActCard extends StatelessWidget {
   final String title;
   final String? year;
   final VoidCallback onTap;
+  final bool isBookmarked;
+  final VoidCallback? onBookmarkTap;
 
   const ActCard({
     super.key,
     required this.title,
     this.year,
     required this.onTap,
+    this.isBookmarked = false,
+    this.onBookmarkTap,
   });
 
   @override
@@ -75,6 +79,19 @@ class ActCard extends StatelessWidget {
                 ],
               ),
             ),
+            if (onBookmarkTap != null)
+              IconButton(
+                onPressed: onBookmarkTap,
+                icon: Icon(
+                  isBookmarked ? Icons.bookmark : Icons.bookmark_border,
+                  color: AppColors.saffron,
+                  size: 20,
+                ),
+                tooltip: isBookmarked ? 'Remove bookmark' : 'Bookmark',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
             const SizedBox(width: 8),
             Icon(Icons.arrow_forward_ios, size: 14, color: AppColors.muted),
           ],

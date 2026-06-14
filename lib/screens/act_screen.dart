@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -9,6 +8,7 @@ import '../utils/firebase_error_handler.dart';
 import '../widgets/act_card.dart';
 import '../utils/ad_constants.dart';
 import '../widgets/banner_ad_widget.dart';
+import '../services/bookmark_service.dart';
 import 'chapters_screen.dart';
 import 'universal_search_screen.dart';
 
@@ -20,10 +20,6 @@ class ActScreen extends StatefulWidget {
 }
 
 class _ActScreenState extends State<ActScreen> {
-  String _searchQuery = '';
-  final TextEditingController _searchController = TextEditingController();
-  Timer? _debounce;
-
   // Pagination state
   final ScrollController _scrollController = ScrollController();
   final List<ActModel> _additionalActs = [];
@@ -41,8 +37,6 @@ class _ActScreenState extends State<ActScreen> {
 
   @override
   void dispose() {
-    _debounce?.cancel();
-    _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -90,6 +84,62 @@ class _ActScreenState extends State<ActScreen> {
     } finally {
       if (mounted) setState(() => _isLoadingMore = false);
     }
+  }
+
+  /// One act row — the card plus its optional "Download Now" PDF button.
+  /// Shared between the "Saved" section and the main browse list.
+  Widget _actCard(BuildContext context, ActModel act,
+      {required bool isBookmarked}) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ActCard(
+          title: act.title,
+          year: act.year > 0 ? act.year.toString() : null,
+          isBookmarked: isBookmarked,
+          onBookmarkTap: () async {
+            await BookmarkService.toggleAct(act);
+            if (mounted) setState(() {});
+          },
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ChaptersScreen(
+                actId: act.id,
+                actTitle: act.title,
+              ),
+            ),
+          ),
+        ),
+        if (act.pdfUrl != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: SizedBox(
+              width: double.infinity,
+              height: 38,
+              child: ElevatedButton.icon(
+                onPressed: () => _downloadPdf(context, act.pdfUrl!),
+                icon: const Icon(Icons.download_outlined, size: 16),
+                label: Text(
+                  'Download Now',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.saffron,
+                  foregroundColor: AppColors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
   }
 
   @override
@@ -166,14 +216,12 @@ class _ActScreenState extends State<ActScreen> {
           // Merge stream page with additional loaded pages
           final allActs = [...streamActs, ..._additionalActs];
 
-          // Client-side filter
-          final filtered = _searchQuery.isEmpty
-              ? allActs
-              : allActs
-                  .where((a) =>
-                      a.title.toLowerCase().contains(_searchQuery) ||
-                      a.year.toString().contains(_searchQuery))
-                  .toList();
+          // Bookmarked acts are pinned to a "Saved" section at the top and
+          // removed from the browse list below to avoid duplicates.
+          final saved = BookmarkService.getActs();
+          final savedIds = saved.map((a) => a.id).toSet();
+          final browse =
+              allActs.where((a) => !savedIds.contains(a.id)).toList();
 
           return CustomScrollView(
             controller: _scrollController,
@@ -242,7 +290,43 @@ class _ActScreenState extends State<ActScreen> {
                 ),
               ),
 
-              // Sliver 2 — Section header + local search
+              // Saved section — bookmarked acts pinned to the top
+              if (saved.isNotEmpty) ...[
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+                    child: Row(
+                      children: [
+                        Icon(Icons.bookmark, color: AppColors.saffron, size: 20),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Saved',
+                          style: GoogleFonts.playfairDisplay(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.onSurface,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) =>
+                        _actCard(context, saved[index], isBookmarked: true),
+                    childCount: saved.length,
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: Divider(color: AppColors.divider, height: 1),
+                  ),
+                ),
+              ],
+
+              // Sliver 2 — Section header
               SliverToBoxAdapter(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -256,54 +340,6 @@ class _ActScreenState extends State<ActScreen> {
                           fontWeight: FontWeight.w600,
                           color: AppColors.onSurface,
                         ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                      child: TextField(
-                        controller: _searchController,
-                        decoration: InputDecoration(
-                          hintText: 'Filter acts...',
-                          prefixIcon: Icon(Icons.search,
-                              color: AppColors.muted, size: 20),
-                          suffixIcon: _searchQuery.isNotEmpty
-                              ? IconButton(
-                                  icon: Icon(Icons.close,
-                                      size: 18, color: AppColors.muted),
-                                  onPressed: () {
-                                    _searchController.clear();
-                                    setState(() => _searchQuery = '');
-                                  },
-                                )
-                              : null,
-                          filled: true,
-                          fillColor: AppColors.white,
-                          hintStyle: GoogleFonts.inter(
-                              fontSize: 14, color: AppColors.muted),
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 12),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: AppColors.divider),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: AppColors.divider),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(
-                                color: AppColors.saffron, width: 1.5),
-                          ),
-                        ),
-                        onChanged: (val) {
-                          if (_debounce?.isActive ?? false) _debounce!.cancel();
-                          _debounce = Timer(
-                            const Duration(milliseconds: 300),
-                            () => setState(
-                                () => _searchQuery = val.trim().toLowerCase()),
-                          );
-                        },
                       ),
                     ),
                   ],
@@ -329,7 +365,7 @@ class _ActScreenState extends State<ActScreen> {
                     ),
                   ),
                 )
-              else if (filtered.isEmpty)
+              else if (saved.isEmpty && browse.isEmpty)
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.all(40),
@@ -338,9 +374,7 @@ class _ActScreenState extends State<ActScreen> {
                         Icon(Icons.search_off, size: 48, color: AppColors.muted),
                         const SizedBox(height: 12),
                         Text(
-                          _searchQuery.isEmpty
-                              ? 'No acts found'
-                              : 'No acts match "$_searchQuery"',
+                          'No acts found',
                           style: GoogleFonts.inter(
                               color: AppColors.muted, fontSize: 14),
                         ),
@@ -350,82 +384,39 @@ class _ActScreenState extends State<ActScreen> {
                 )
               else ...[
                 // Acts list
-                SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      if ((index + 1) % 7 == 0) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8.0),
-                          child: Center(child: BannerAdWidget(adUnitId: AdConstants.bannerAdUnitIdHome)),
-                        );
-                      }
-                      final actIndex = (index ~/ 7) * 6 + (index % 7);
-                      if (actIndex >= filtered.length) {
-                        return const SizedBox.shrink();
-                      }
-                      final act = filtered[actIndex];
-                      return Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          ActCard(
-                            title: act.title,
-                            year: act.year > 0 ? act.year.toString() : null,
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ChaptersScreen(
-                                  actId: act.id,
-                                  actTitle: act.title,
-                                ),
-                              ),
-                            ),
-                          ),
-                          if (act.pdfUrl != null)
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-                              child: SizedBox(
-                                width: double.infinity,
-                                height: 38,
-                                child: ElevatedButton.icon(
-                                  onPressed: () => _downloadPdf(context, act.pdfUrl!),
-                                  icon: const Icon(Icons.download_outlined, size: 16),
-                                  label: Text(
-                                    'Download Now',
-                                    style: GoogleFonts.inter(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppColors.saffron,
-                                    foregroundColor: AppColors.white,
-                                    elevation: 0,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      );
-                    },
-                    childCount: filtered.length + filtered.length ~/ 6,
+                if (browse.isNotEmpty)
+                  SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        if ((index + 1) % 7 == 0) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8.0),
+                            child: Center(child: BannerAdWidget(adUnitId: AdConstants.bannerAdUnitIdHome)),
+                          );
+                        }
+                        final actIndex = (index ~/ 7) * 6 + (index % 7);
+                        if (actIndex >= browse.length) {
+                          return const SizedBox.shrink();
+                        }
+                        return _actCard(context, browse[actIndex],
+                            isBookmarked: false);
+                      },
+                      childCount: browse.length + browse.length ~/ 6,
+                    ),
                   ),
-                ),
 
                 // Footer: count + load more
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                     child: Text(
-                      '${filtered.length} act${filtered.length == 1 ? '' : 's'} found',
+                      '${browse.length} act${browse.length == 1 ? '' : 's'} found',
                       style: GoogleFonts.inter(
                           fontSize: 12, color: AppColors.muted),
                     ),
                   ),
                 ),
-                if (_hasMore && _searchQuery.isEmpty)
+                if (_hasMore)
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),

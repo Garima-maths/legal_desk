@@ -3,9 +3,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'dart:async';
 import '../theme/app_theme.dart';
 import '../models/act_model.dart';
+import '../models/section_search_result.dart';
 import '../repositories/firestore_repository.dart';
 import '../utils/firebase_error_handler.dart';
 import 'chapters_screen.dart';
+import 'section_detail_screen.dart';
 
 class UniversalSearchScreen extends StatefulWidget {
   const UniversalSearchScreen({super.key});
@@ -19,6 +21,7 @@ class _UniversalSearchScreenState extends State<UniversalSearchScreen> {
   String _query = '';
   Timer? _debounce;
   List<ActModel> _actResults = [];
+  List<SectionSearchResult> _sectionResults = [];
   bool _isLoading = false;
   bool _hasSearched = false;
   String? _errorMessage;
@@ -44,6 +47,7 @@ class _UniversalSearchScreenState extends State<UniversalSearchScreen> {
       } else {
         setState(() {
           _actResults = [];
+          _sectionResults = [];
           _hasSearched = false;
         });
       }
@@ -56,11 +60,16 @@ class _UniversalSearchScreenState extends State<UniversalSearchScreen> {
       _hasSearched = true;
       _errorMessage = null;
     });
+    final query = _query;
     try {
-      final results = await _repo.searchActs(_query);
-      if (!mounted) return;
+      final results = await Future.wait([
+        _repo.searchActs(query),
+        _repo.searchSections(query),
+      ]);
+      if (!mounted || _query != query) return;
       setState(() {
-        _actResults = results;
+        _actResults = results[0] as List<ActModel>;
+        _sectionResults = results[1] as List<SectionSearchResult>;
         _isLoading = false;
       });
     } on FirestoreException catch (e) {
@@ -251,7 +260,7 @@ class _UniversalSearchScreenState extends State<UniversalSearchScreen> {
       );
     }
 
-    if (_actResults.isEmpty) {
+    if (_actResults.isEmpty && _sectionResults.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -272,20 +281,147 @@ class _UniversalSearchScreenState extends State<UniversalSearchScreen> {
 
     return ListView(
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Text(
-            'Acts  •  ${_actResults.length} found',
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppColors.muted,
-              letterSpacing: 0.5,
-            ),
+        if (_actResults.isNotEmpty) ...[
+          _sectionHeader('Acts  •  ${_actResults.length} found'),
+          ..._actResults.map(_buildActResult),
+        ],
+        if (_sectionResults.isNotEmpty) ...[
+          _sectionHeader('Sections  •  ${_sectionResults.length} found'),
+          ..._sectionResults.map(_buildSectionResult),
+        ],
+      ],
+    );
+  }
+
+  Widget _sectionHeader(String label) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Text(
+        label,
+        style: GoogleFonts.inter(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: AppColors.muted,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
+
+  /// Returns a content excerpt centred on the first match of [query], so the
+  /// user sees why the section matched.
+  String _snippet(String content, String query) {
+    if (content.isEmpty) return '';
+    final idx = content.toLowerCase().indexOf(query);
+    if (idx <= 60) {
+      return content.length <= 160 ? content : '${content.substring(0, 160)}…';
+    }
+    final start = idx - 50;
+    final end = (idx + 110).clamp(0, content.length);
+    return '…${content.substring(start, end)}…';
+  }
+
+  Widget _buildSectionResult(SectionSearchResult result) {
+    final section = result.section;
+    final numberLabel =
+        section.sectionNumber > 0 ? 'Section ${section.sectionNumber}' : null;
+    final snippet = _snippet(section.content, _query);
+    return Material(
+      color: AppColors.white,
+      child: InkWell(
+        onTap: () => _openSection(result),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: AppColors.divider)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppColors.saffron.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(Icons.article_outlined,
+                    color: AppColors.saffron, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (numberLabel != null) ...[
+                      Text(
+                        numberLabel,
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.saffron,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                    ],
+                    _highlightText(
+                      section.title.isNotEmpty ? section.title : 'Untitled',
+                      _query,
+                    ),
+                    if (result.actTitle.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        result.actTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.inter(
+                            fontSize: 12, color: AppColors.muted),
+                      ),
+                    ],
+                    if (snippet.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        snippet,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.inter(
+                            fontSize: 12, color: AppColors.muted, height: 1.4),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Icon(Icons.arrow_forward_ios, size: 14, color: AppColors.muted),
+            ],
           ),
         ),
-        ..._actResults.map(_buildActResult),
-      ],
+      ),
+    );
+  }
+
+  /// Resolves the chapter title (not denormalized on the section doc) then
+  /// opens the section detail screen. The chapter title only feeds download
+  /// labels, so a blank fallback is acceptable if the lookup fails.
+  Future<void> _openSection(SectionSearchResult result) async {
+    String chapterName = '';
+    try {
+      final chapters = await _repo.fetchChapters(result.actId);
+      final match = chapters.where((c) => c.id == result.chapterId);
+      if (match.isNotEmpty) chapterName = match.first.title;
+    } catch (_) {
+      // Best-effort; the section still opens without a chapter label.
+    }
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SectionDetailScreen(
+          section: result.section,
+          actId: result.actId,
+          actName: result.actTitle,
+          chapterName: chapterName,
+        ),
+      ),
     );
   }
 
@@ -319,6 +455,7 @@ class _UniversalSearchScreenState extends State<UniversalSearchScreen> {
                       setState(() {
                         _query = '';
                         _actResults = [];
+                        _sectionResults = [];
                         _hasSearched = false;
                         _errorMessage = null;
                       });

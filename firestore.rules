@@ -1,0 +1,33 @@
+rules_version = '2';
+
+// Legal Desk security rules.
+// Public legal content is readable by anyone (the app browses it without login).
+// Each advocate can read/write only their own profile under users/{uid}.
+// Server-side import/scraper scripts use the Admin SDK, which bypasses these rules.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Each advocate's own profile (created at sign-up) — owner only.
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Public legal content — anyone may read; no client writes.
+    match /acts/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /judgements/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /dictionary/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /draft_categories/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

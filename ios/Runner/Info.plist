@@ -41,6 +41,11 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- This is Google's TEST AdMob app id, which serves only test ads on iOS.
+	     Before shipping production iOS ads, replace it with this app's own iOS
+	     AdMob app id (format ca-app-pub-2986638814167460~XXXXXXXXXX, created as
+	     an iOS app entry in the AdMob console) AND set a real _prodBannerIOS in
+	     lib/utils/ad_constants.dart. Do NOT reuse the Android app id here. -->
 	<key>GADApplicationIdentifier</key>
 	<string>ca-app-pub-3940256099942544~1458002511</string>
 	<key>SKAdNetworkItems</key>
@@ -54,5 +59,11 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- Allow the app to be woken in the background to handle incoming
+	     remote (push) notifications for FCM. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 </dict>
 </plist>

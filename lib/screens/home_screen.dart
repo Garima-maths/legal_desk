@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
+import 'auth/registration_screen.dart';
 import 'act_screen.dart';
 import 'dictionary_screen.dart';
 import 'universal_search_screen.dart';
@@ -115,6 +116,11 @@ class _AppDrawer extends StatelessWidget {
             Navigator.pop(context);
             Navigator.push(context,
                 MaterialPageRoute(builder: (_) => const DownloadedSectionsScreen()));
+          }),
+          _drawerItem(context, Icons.person_add_outlined, 'Sign Up', () {
+            Navigator.pop(context);
+            Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const RegistrationScreen()));
           }),
           const Spacer(),
           const Divider(color: Colors.white12, height: 1),

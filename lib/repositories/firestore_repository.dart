@@ -4,6 +4,7 @@ import '../models/chapter_model.dart';
 import '../models/section_model.dart';
 import '../models/dictionary_term_model.dart';
 import '../models/judgement_model.dart';
+import '../models/section_search_result.dart';
 import '../utils/firebase_error_handler.dart';
 
 /// Single source of truth for all Firestore interactions.
@@ -80,9 +81,12 @@ class FirestoreRepository {
 
   Future<List<ActModel>> _fetchAllActsFromServer() async {
     try {
+      // serverAndCache (not Source.server) so search still works on a slow or
+      // offline connection — Source.server throws instead of falling back to
+      // the offline-persisted cache, which broke search on poor networks.
       final snap = await _db
           .collection('acts')
-          .get(const GetOptions(source: Source.server));
+          .get(const GetOptions(source: Source.serverAndCache));
       return snap.docs.map(ActModel.fromSnapshot).toList();
     } on FirebaseException catch (e) {
       throw FirebaseErrorHandler.handle(e);
@@ -173,6 +177,57 @@ class FirestoreRepository {
       final sections = snap.docs.map(SectionModel.fromSnapshot).toList();
       sections.sort((a, b) => a.sectionNumber.compareTo(b.sectionNumber));
       return sections;
+    } on FirebaseException catch (e) {
+      throw FirebaseErrorHandler.handle(e);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Global section search — downloads all sections once per session via a
+  // collectionGroup query, then filters client-side (Firestore has no native
+  // substring/full-text search). Catches subcollections named "sections".
+  // -------------------------------------------------------------------------
+  List<SectionSearchResult>? _sectionsCache;
+
+  void invalidateSectionsCache() => _sectionsCache = null;
+
+  /// Search all sections by title or content (case-insensitive substring),
+  /// across every act. Results carry the parent ids needed to open the
+  /// section detail screen; [actTitle] is resolved from the acts cache.
+  Future<List<SectionSearchResult>> searchSections(String query) async {
+    try {
+      _sectionsCache ??= await _fetchAllSectionsFromServer();
+      _actsCache ??= await _fetchAllActsFromServer();
+      final actTitleById = {for (final a in _actsCache!) a.id: a.title};
+      final lower = query.toLowerCase();
+      return _sectionsCache!
+          .where((r) =>
+              r.section.title.toLowerCase().contains(lower) ||
+              r.section.content.toLowerCase().contains(lower))
+          .map((r) => r.copyWith(actTitle: actTitleById[r.actId] ?? ''))
+          .toList();
+    } on FirestoreException {
+      rethrow;
+    } catch (e) {
+      throw FirebaseErrorHandler.handleUnknown(e);
+    }
+  }
+
+  Future<List<SectionSearchResult>> _fetchAllSectionsFromServer() async {
+    try {
+      final snap = await _db
+          .collectionGroup('sections')
+          .get(const GetOptions(source: Source.serverAndCache));
+      return snap.docs.map((doc) {
+        // Path: acts/{actId}/chapters/{chapterId}/{sectionsCollection}/{id}
+        final seg = doc.reference.path.split('/');
+        return SectionSearchResult(
+          section: SectionModel.fromSnapshot(doc),
+          actId: seg.length > 1 ? seg[1] : '',
+          chapterId: seg.length > 3 ? seg[3] : '',
+          sectionsCollection: seg.length > 4 ? seg[4] : 'sections',
+        );
+      }).toList();
     } on FirebaseException catch (e) {
       throw FirebaseErrorHandler.handle(e);
     }
@@ -301,12 +356,31 @@ class FirestoreRepository {
 
   void invalidateJudgementsCache() => _judgementsCache = null;
 
+  /// One-shot fetch of a single judgement by document id.
+  ///
+  /// Used for deep-linking from a tapped push notification, which carries only
+  /// the judgement id — the detail screen needs a full [JudgementModel].
+  /// Returns null if no such document exists.
+  Future<JudgementModel?> getJudgementById(String id) async {
+    try {
+      final doc = await _db
+          .collection('judgements')
+          .doc(id)
+          .get(const GetOptions(source: Source.serverAndCache));
+      return doc.exists ? JudgementModel.fromSnapshot(doc) : null;
+    } on FirebaseException catch (e) {
+      throw FirebaseErrorHandler.handle(e);
+    }
+  }
+
   Future<List<JudgementModel>> _fetchAllJudgementsFromServer() async {
     try {
+      // serverAndCache (not Source.server) so search still works on a slow or
+      // offline connection — see note in _fetchAllActsFromServer.
       final snap = await _db
           .collection('judgements')
           .orderBy('date', descending: true)
-          .get(const GetOptions(source: Source.server));
+          .get(const GetOptions(source: Source.serverAndCache));
       return snap.docs.map(JudgementModel.fromSnapshot).toList();
     } on FirebaseException catch (e) {
       throw FirebaseErrorHandler.handle(e);

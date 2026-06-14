@@ -7,6 +7,7 @@ import '../repositories/firestore_repository.dart';
 import '../utils/firebase_error_handler.dart';
 import '../utils/ad_constants.dart';
 import '../widgets/banner_ad_widget.dart';
+import '../services/bookmark_service.dart';
 import 'judgement_detail_screen.dart';
 
 class JudgementsScreen extends StatefulWidget {
@@ -22,6 +23,12 @@ class _JudgementsScreenState extends State<JudgementsScreen> {
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
   Timer? _debounce;
+
+  // Full-dataset search state. When a query is active the list is driven by
+  // these results (from FirestoreRepository.searchJudgements) instead of the
+  // limited browse stream, so judgements beyond the first page are findable.
+  List<JudgementModel>? _searchResults;
+  bool _isSearching = false;
 
   int? _selectedYear;
 
@@ -48,7 +55,41 @@ class _JudgementsScreenState extends State<JudgementsScreen> {
       _lastStreamJudgement = null;
       _searchQuery = '';
       _searchController.clear();
+      _searchResults = null;
+      _isSearching = false;
     });
+  }
+
+  /// Searches the entire judgements collection (cached after the first call),
+  /// across all years, so matches outside the loaded browse page are found.
+  /// A stale-query guard drops out-of-order responses from earlier keystrokes.
+  Future<void> _performSearch(String query) async {
+    if (query.isEmpty) {
+      setState(() {
+        _searchResults = null;
+        _isSearching = false;
+      });
+      return;
+    }
+    setState(() {
+      // Search spans all years; reset the year-browse filter for a consistent UI.
+      _selectedYear = null;
+      _isSearching = true;
+    });
+    try {
+      final results = await _repo.searchJudgements(query);
+      if (!mounted || _searchQuery != query) return;
+      setState(() {
+        _searchResults = results;
+        _isSearching = false;
+      });
+    } on FirestoreException catch (e) {
+      if (!mounted) return;
+      setState(() => _isSearching = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+    }
   }
 
   @override
@@ -89,6 +130,27 @@ class _JudgementsScreenState extends State<JudgementsScreen> {
     } finally {
       if (mounted) setState(() => _isLoadingMore = false);
     }
+  }
+
+  /// One judgement row, shared between the "Saved" section and the main list.
+  Widget _judgementTile(BuildContext context, JudgementModel j,
+      {required bool isBookmarked}) {
+    return _JudgementCard(
+      judgement: j,
+      isBookmarked: isBookmarked,
+      onBookmarkTap: () async {
+        await BookmarkService.toggleJudgement(j);
+        if (mounted) setState(() {});
+      },
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => JudgementDetailScreen(judgement: j),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -156,13 +218,21 @@ class _JudgementsScreenState extends State<JudgementsScreen> {
 
           final all = [...streamJudgements, ..._additionalJudgements];
 
-          final filtered = _searchQuery.isEmpty
-              ? all
-              : all.where((j) {
-                  return j.title.toLowerCase().contains(_searchQuery) ||
-                      j.snippet.toLowerCase().contains(_searchQuery) ||
-                      j.year.toString().contains(_searchQuery);
-                }).toList();
+          // When searching, drive the list from the full-dataset search
+          // results; otherwise show the year/paginated browse list.
+          final bool searching = _searchQuery.isNotEmpty;
+          final filtered =
+              searching ? (_searchResults ?? const <JudgementModel>[]) : all;
+
+          // Bookmarked judgements are pinned to a "Saved" section at the top
+          // (only while browsing, not during an active search) and removed
+          // from the list below to avoid duplicates.
+          final saved =
+              searching ? <JudgementModel>[] : BookmarkService.getJudgements();
+          final savedIds = saved.map((j) => j.id).toSet();
+          final browse = saved.isEmpty
+              ? filtered
+              : filtered.where((j) => !savedIds.contains(j.id)).toList();
 
           return CustomScrollView(
             controller: _scrollController,
@@ -210,6 +280,42 @@ class _JudgementsScreenState extends State<JudgementsScreen> {
                 ),
               ),
 
+              // Saved section — bookmarked judgements pinned to the top
+              if (saved.isNotEmpty) ...[
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+                    child: Row(
+                      children: [
+                        Icon(Icons.bookmark, color: AppColors.saffron, size: 20),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Saved',
+                          style: GoogleFonts.playfairDisplay(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.onSurface,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) =>
+                        _judgementTile(context, saved[index], isBookmarked: true),
+                    childCount: saved.length,
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: Divider(color: AppColors.divider, height: 1),
+                  ),
+                ),
+              ],
+
               // Section header + search
               SliverToBoxAdapter(
                 child: Column(
@@ -240,7 +346,11 @@ class _JudgementsScreenState extends State<JudgementsScreen> {
                                       size: 18, color: AppColors.muted),
                                   onPressed: () {
                                     _searchController.clear();
-                                    setState(() => _searchQuery = '');
+                                    setState(() {
+                                      _searchQuery = '';
+                                      _searchResults = null;
+                                      _isSearching = false;
+                                    });
                                   },
                                 )
                               : null,
@@ -268,8 +378,11 @@ class _JudgementsScreenState extends State<JudgementsScreen> {
                           if (_debounce?.isActive ?? false) _debounce!.cancel();
                           _debounce = Timer(
                             const Duration(milliseconds: 300),
-                            () => setState(
-                                () => _searchQuery = val.trim().toLowerCase()),
+                            () {
+                              final q = val.trim().toLowerCase();
+                              setState(() => _searchQuery = q);
+                              _performSearch(q);
+                            },
                           );
                         },
                       ),
@@ -290,8 +403,10 @@ class _JudgementsScreenState extends State<JudgementsScreen> {
               ),
 
               // Loading / empty / list
-              if (snapshot.connectionState == ConnectionState.waiting &&
-                  all.isEmpty)
+              if ((searching && _isSearching && _searchResults == null) ||
+                  (!searching &&
+                      snapshot.connectionState == ConnectionState.waiting &&
+                      all.isEmpty))
                 SliverToBoxAdapter(
                   child: Center(
                     child: Padding(
@@ -301,7 +416,7 @@ class _JudgementsScreenState extends State<JudgementsScreen> {
                     ),
                   ),
                 )
-              else if (filtered.isEmpty)
+              else if (saved.isEmpty && browse.isEmpty)
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.all(40),
@@ -321,47 +436,37 @@ class _JudgementsScreenState extends State<JudgementsScreen> {
                   ),
                 )
               else ...[
-                SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      if ((index + 1) % 7 == 0) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8.0),
-                          child: Center(
-                            child: BannerAdWidget(
-                                adUnitId:
-                                    AdConstants.bannerAdUnitIdJudgements),
-                          ),
-                        );
-                      }
-                      final jIndex = (index ~/ 7) * 6 + (index % 7);
-                      if (jIndex >= filtered.length) {
-                        return const SizedBox.shrink();
-                      }
-                      final j = filtered[jIndex];
-                      return _JudgementCard(
-                        judgement: j,
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  JudgementDetailScreen(judgement: j),
+                if (browse.isNotEmpty)
+                  SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        if ((index + 1) % 7 == 0) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8.0),
+                            child: Center(
+                              child: BannerAdWidget(
+                                  adUnitId:
+                                      AdConstants.bannerAdUnitIdJudgements),
                             ),
                           );
-                        },
-                      );
-                    },
-                    childCount: filtered.length + filtered.length ~/ 6,
+                        }
+                        final jIndex = (index ~/ 7) * 6 + (index % 7);
+                        if (jIndex >= browse.length) {
+                          return const SizedBox.shrink();
+                        }
+                        return _judgementTile(context, browse[jIndex],
+                            isBookmarked: false);
+                      },
+                      childCount: browse.length + browse.length ~/ 6,
+                    ),
                   ),
-                ),
 
                 // Footer
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                     child: Text(
-                      '${filtered.length} judgement${filtered.length == 1 ? '' : 's'} found',
+                      '${browse.length} judgement${browse.length == 1 ? '' : 's'} found',
                       style: GoogleFonts.inter(
                           fontSize: 12, color: AppColors.muted),
                     ),
@@ -402,10 +507,14 @@ class _JudgementsScreenState extends State<JudgementsScreen> {
 class _JudgementCard extends StatelessWidget {
   final JudgementModel judgement;
   final VoidCallback onTap;
+  final bool isBookmarked;
+  final VoidCallback? onBookmarkTap;
 
   const _JudgementCard({
     required this.judgement,
     required this.onTap,
+    this.isBookmarked = false,
+    this.onBookmarkTap,
   });
 
   @override
@@ -481,6 +590,19 @@ class _JudgementCard extends StatelessWidget {
                   ],
                 ),
               ),
+              if (onBookmarkTap != null)
+                IconButton(
+                  onPressed: onBookmarkTap,
+                  icon: Icon(
+                    isBookmarked ? Icons.bookmark : Icons.bookmark_border,
+                    color: AppColors.saffron,
+                    size: 20,
+                  ),
+                  tooltip: isBookmarked ? 'Remove bookmark' : 'Bookmark',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
               const SizedBox(width: 8),
               Icon(
                 Icons.arrow_forward_ios,

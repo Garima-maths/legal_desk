@@ -5,6 +5,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'firebase_options.dart';
 import 'screens/home_screen.dart';
+import 'services/notification_service.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
@@ -28,6 +29,15 @@ void main() async {
 
     await Hive.initFlutter();
     await Hive.openBox('downloadedSections');
+    await Hive.openBox('bookmarks');
+
+    // Set up push notifications. Failures here must never block app launch,
+    // so we log and continue rather than letting them reach the catch below.
+    try {
+      await NotificationService.instance.init();
+    } catch (e, stack) {
+      debugPrint('Notification setup failed (continuing): $e\n$stack');
+    }
 
     runApp(const MyApp());
   } catch (e, stack) {
@@ -45,6 +55,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Legal Desk',
       debugShowCheckedModeBanner: false,
+      navigatorKey: NotificationService.navigatorKey,
       theme: AppTheme.theme,
       home: const HomeScreen(),
     );
